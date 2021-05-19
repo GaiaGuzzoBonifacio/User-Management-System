@@ -23,8 +23,8 @@ class UserModel
     // CRUD
     public function create(User $user)
     {
-
         try {
+
             $pdostm = $this->conn->prepare('INSERT INTO User (firstName,lastName,email,birthday,password)
             VALUES (:firstName,:lastName,:email,:birthday,:password);');
 
@@ -32,13 +32,12 @@ class UserModel
             $pdostm->bindValue(':lastName', $user->getLastName(), PDO::PARAM_STR);
             $pdostm->bindValue(':email', $user->getEmail(), PDO::PARAM_STR);
             $pdostm->bindValue(':birthday', $user->getBirthday(), PDO::PARAM_STR);
-            $pdostm->bindValue(':password', $user->getPassword(), PDO::PARAM_STR);
-
+            $pdostm->bindValue(':password', password_hash($user->getPassword(), PASSWORD_ARGON2I), PDO::PARAM_STR); //password_hash per criptazione psw
+            //PASSWORD_ARGON2I è una costante di criptazione usata dalla funzione password_hash, ce ne sono diverse, si può cambiare
             $pdostm->execute();
         } catch (\PDOException $e) {
-            // TODO: Evitare echo
-            echo $e->getMessage();
-
+           
+            throw $e;
         }
     }
 
@@ -75,22 +74,26 @@ class UserModel
         $sql = "UPDATE User set firstName=:firstName, 
                                 lastName=:lastName,
                                 email=:email,
-                                birthday=:birthday,
-                                password=:password
+                                birthday=:birthday
                                 where userId=:user_id;";
         $pdostm = $this->conn->prepare($sql);
         $pdostm->bindValue(':firstName', $user->getFirstName(), PDO::PARAM_STR);
         $pdostm->bindValue(':lastName', $user->getLastName(), PDO::PARAM_STR);
         $pdostm->bindValue(':email', $user->getEmail(), PDO::PARAM_STR);
         $pdostm->bindValue(':birthday', $user->getBirthday(), PDO::PARAM_STR);
-        $pdostm->bindValue(':password', $user->getPassword(), PDO::PARAM_STR);
-        $pdostm->bindValue(':user_id',$user->getUserId());
-        $pdostm->execute();
+        $pdostm->bindValue(':user_id', $user->getUserId());
+        
+        try {
+            $pdostm->execute();
 
-        if($pdostm->rowCount() === 0) {
-            return false;
-        } else if($pdostm->rowCount() === 1){
-            return true;
+            if ($pdostm->rowCount() === 0) {
+                return false;
+            } elseif ($pdostm->rowCount() === 1) {
+                return true;
+            }
+            
+        } catch (\Throwable $th) {
+            throw $th;
         }
     }
 
@@ -110,25 +113,33 @@ class UserModel
         }  
     }
 
-    public function authenticate($email, $password) {
+    
+    public function findByEmail(string $email):?User //restituisco l'utente o niente filtrando per mail
+    {
+        try {
+            $sql = "Select * from User where email=:email";
+            $pdostm = $this->conn->prepare($sql);
+            $pdostm->bindValue('email', $email, PDO::PARAM_STR);
+            $pdostm->execute();
+            $result = $pdostm->fetchAll(PDO::FETCH_CLASS|PDO::FETCH_PROPS_LATE, User::class, ['','','','','']);
 
-        {
-            try {
-                $sql = "SELECT * from User where email=:email AND password=:password";
-                $pdostm = $this->conn->prepare($sql);
-                $pdostm->bindValue('email', $email, PDO::PARAM_INT);
-                $pdostm->bindValue('password', $password, PDO::PARAM_INT);
-                $pdostm->execute();
-                $result = $pdostm->fetchAll(PDO::FETCH_CLASS|PDO::FETCH_PROPS_LATE,User::class,['','']);
-    
-                return count($result) === 0 ? null : $result[0];
-    
-            } catch (\Throwable $th) {
-                
-                echo "qualcosa è andato storto";
-                echo " ". $th->getMessage();
-                //throw $th;
-            }
+            return count($result) === 0 ? null : $result[0]; //se è uguale a 0 allora nada, sennò prendimi il primo risultato trovato
+
+        } catch (\Throwable $th) {
+            echo "qualcosa è andato storto";
+            echo " ". $th->getMessage();
+            //throw $th;
         }
+    }
+
+    public function authenticate(string $email, string $password):?User
+    {
+        $user = $this->findByEmail($email);
+        if(!is_null($user)) {
+            $passwordHash = $user->getPassword();
+                                //(psw data dall'utente, psw data dall'hash)
+            return password_verify($password,$passwordHash) ? $user : null;
+        }
+        return null;
     }
 }
